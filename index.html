@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#000">
+<title>Semáforo PRO Rápido</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+#cam{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+#veil{position:fixed;inset:0;pointer-events:none;background:linear-gradient(#0007,transparent 25%,transparent 72%,#000b)}
+#frame{position:fixed;left:4%;right:4%;top:20%;height:55%;border:3px solid #fff;border-radius:24px;z-index:3;pointer-events:none}
+#state{position:fixed;top:calc(env(safe-area-inset-top) + 14px);left:12px;right:12px;text-align:center;color:#fff;background:#000b;border-radius:20px;padding:8px;font-size:13px;font-weight:800;z-index:5}
+#go{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:10;border:0;border-radius:24px;padding:15px 22px;font-size:17px;font-weight:900;background:#fff;color:#111}
+#light{position:fixed;z-index:8;left:50%;top:50%;transform:translate(-50%,-50%);width:220px;height:220px;border-radius:50%;display:none;box-shadow:0 0 55px rgba(255,255,255,.45)}
+.green{background:#00d65b}.white{background:#f1f1f1}.yellow{background:#ffd400}.orange{background:#ff7b00}.red{background:#e60022}
+</style>
+</head>
+<body>
+<video id="cam" autoplay playsinline muted></video>
+<div id="veil"></div><div id="frame"></div>
+<div id="state">Apunta la oferta al recuadro</div>
+<button id="go">ACTIVAR</button>
+<div id="light"></div>
+<canvas id="cv" hidden></canvas>
+
+<script>
+const cam=document.getElementById('cam'),state=document.getElementById('state'),go=document.getElementById('go'),light=document.getElementById('light'),cv=document.getElementById('cv'),cx=cv.getContext('2d',{willReadFrequently:true});
+let stream=null,worker=null,running=false,busy=false,lastScan=0,lastGood=null;
+
+function hourLevel(v){return v>=300?4:v>=250?3:v>=215?2:v>=200?1:0}
+function kmLevel(v){return v>=11?4:v>=10?3:v>=9?2:v>=8?1:0}
+function finalLevel(h,k){return Math.min(hourLevel(h),kmLevel(k))}
+function paint(level){
+ const cls=['red','orange','yellow','white','green'][level];
+ light.className=cls;light.style.display='block';
+ state.textContent='';
+}
+
+function number(s){
+ const v=parseFloat(String(s).replace(',','.').replace(/[^\d.]/g,''));
+ return Number.isFinite(v)?v:null;
+}
+
+/*
+ Extrae PARES de tiempo/distancia del mismo bloque.
+ No toma el primer número de la pantalla como total.
+*/
+function extract(text){
+ text=text.toLowerCase().replace(/\u00a0/g,' ').replace(/[|]/g,'1');
+
+ const money=[...text.matchAll(/\$\s*(\d{1,5}(?:[.,]\d{1,2})?)/g)]
+   .map(m=>number(m[1])).filter(v=>v!==null);
+ if(!money.length)return null;
+ const pay=Math.max(...money);
+
+ // Forma principal: 8 min (3.8 km), 18 min (11.4 km)
+ const pairs=[];
+ const re=/(\d+(?:[.,]\d+)?)\s*(?:min(?:utos)?|m)\s*(?:\(\s*)?(\d+(?:[.,]\d+)?)\s*(?:km|kms)\s*\)?/gi;
+ for(const m of text.matchAll(re)){
+   const min=number(m[1]),km=number(m[2]);
+   if(min>0&&km>0&&min<=180&&km<=200)pairs.push([min,km]);
+ }
+
+ // Fallback: cada línea de OCR puede conservar una pareja.
+ if(!pairs.length){
+   for(const line of text.split(/\n+/)){
+     const a=line.match(/(\d+(?:[.,]\d+)?)\s*(?:min(?:utos)?|m)\b/i);
+     const b=line.match(/(\d+(?:[.,]\d+)?)\s*(?:km|kms)\b/i);
+     if(a&&b){
+       const min=number(a[1]),km=number(b[1]);
+       if(min>0&&km>0)pairs.push([min,km]);
+     }
+   }
+ }
+ if(!pairs.length)return null;
+
+ // Elimina duplicados que el OCR pueda producir.
+ const unique=[];
+ for(const p of pairs){
+   if(!unique.some(q=>Math.abs(q[0]-p[0])<.01&&Math.abs(q[1]-p[1])<.01))unique.push(p);
+ }
+ if(!unique.length)return null;
+
+ const totalMin=unique.reduce((s,p)=>s+p[0],0);
+ const totalKm=unique.reduce((s,p)=>s+p[1],0);
+ if(totalMin<=0||totalKm<=0)return null;
+
+ const ph=pay*60/totalMin;
+ const pk=pay/totalKm;
+ const level=finalLevel(ph,pk);
+
+ return {pay,totalMin,totalKm,ph,pk,level};
+}
+
+function crop(){
+ const w=cam.videoWidth,h=cam.videoHeight;
+ if(!w||!h)return false;
+
+ // Área central amplia: tolera pulso sin tener que encuadrar al milímetro.
+ const sx=Math.floor(w*.04),sy=Math.floor(h*.20),sw=Math.floor(w*.92),sh=Math.floor(h*.55);
+ const outW=Math.min(900,sw),outH=Math.round(outW*sh/sw);
+ cv.width=outW;cv.height=outH;
+ cx.drawImage(cam,sx,sy,sw,sh,0,0,outW,outH);
+
+ // Contraste rápido, sin procesamiento pesado.
+ const im=cx.getImageData(0,0,outW,outH),d=im.data;
+ for(let i=0;i<d.length;i+=4){
+   const y=.299*d[i]+.587*d[i+1]+.114*d[i+2];
+   const z=Math.max(0,Math.min(255,(y-100)*1.65+100));
+   d[i]=d[i+1]=d[i+2]=z;
+ }
+ cx.putImageData(im,0,0);
+ return true;
+}
+
+async function init(){
+ if(worker)return;
+ // Inglés + español para reconocer "min", "km" y números.
+ worker=await Tesseract.createWorker('eng',1);
+ await worker.setParameters({
+   tessedit_pageseg_mode:'6',
+   preserve_interword_spaces:'1',
+   user_defined_dpi:'160'
+ });
+}
+
+async function oneScan(){
+ if(busy||!running||!worker)return;
+ busy=true;
+ try{
+   if(!crop())return;
+   const r=await worker.recognize(cv);
+   const o=extract(r.data.text||'');
+   if(o){
+     /*
+       Primera lectura válida se muestra inmediatamente.
+       Una lectura posterior solo puede sustituirla si coincide
+       razonablemente; un frame movido no cambia el color.
+     */
+     if(!lastGood){
+       lastGood=o;
+       paint(o.level);
+     }else{
+       const same=Math.abs(lastGood.pay-o.pay)<=1 &&
+                  Math.abs(lastGood.totalMin-o.totalMin)<=1 &&
+                  Math.abs(lastGood.totalKm-o.totalKm)<=.5;
+       if(same)lastGood=o;
+     }
+   }
+ }catch(e){}finally{
+   busy=false;lastScan=performance.now();
+ }
+}
+
+function loop(t){
+ if(t-lastScan>450)oneScan();
+ requestAnimationFrame(loop);
+}
+
+async function start(){
+ try{
+  go.style.display='none';
+  state.textContent='Activando…';
+  stream=await navigator.mediaDevices.getUserMedia({
+    video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},
+    audio:false
+  });
+  cam.srcObject=stream;
+  await cam.play();
+  await init();
+  running=true;
+  state.textContent='Listo';
+  requestAnimationFrame(loop);
+ }catch(e){
+  go.style.display='block';
+  state.textContent='Permite la cámara';
+ }
+}
+go.onclick=start;
+</script>
+</body>
+</html>
