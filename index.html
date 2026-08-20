@@ -16,7 +16,8 @@
 #scan{position:fixed;z-index:20;left:50%;bottom:calc(112px + env(safe-area-inset-bottom));transform:translateX(-50%);width:76px;height:76px;border:0;border-radius:50%;background:#10c94b;color:#fff;font-size:29px;box-shadow:0 5px 22px rgba(0,0,0,.5)}
 #scan:disabled{opacity:.5}
 #bottom{position:fixed;z-index:10;left:10px;right:10px;bottom:calc(9px + env(safe-area-inset-bottom));min-height:78px;padding:10px 14px;border-radius:22px;background:rgba(0,0,0,.92);color:#fff;text-align:center}
-#answer{font-size:32px;font-weight:950;line-height:1.05}
+#answer{height:42px;display:flex;align-items:center;justify-content:center}
+#answer .lamp{width:38px;height:38px;border-radius:50%;display:block;box-shadow:0 0 18px currentColor}
 #detail{margin-top:5px;font-size:13px;color:#ddd}
 .green{color:#18df5c}.white{color:#fff}.yellow{color:#ffd21b}.orange{color:#ff9518}.red{color:#ff3030}
 #debug{position:fixed;left:8px;right:8px;bottom:calc(100px + env(safe-area-inset-bottom));z-index:9;display:none;background:rgba(0,0,0,.75);color:#fff;border-radius:12px;padding:7px;font-size:11px}
@@ -57,15 +58,52 @@ function price(text){
  return m?num(m[1]):null;
 }
 function legs(text){
- // Acepta OCR con "min", "m in", "km", "k m", etc.
- const s=text.replace(/[|]/g,'1').replace(/\u00a0/g,' ');
- const re=/(\d{1,3})\s*m\s*i\s*n\s*[\(\[]\s*([0-9]{1,4}(?:[.,][0-9]+)?)\s*k\s*m/gi;
- const out=[];let m;
- while((m=re.exec(s))){
+ // Parser tolerante para Uber y DiDi. No depende de que exista
+ // parentesis, ni de que min/km queden en la misma linea.
+ let s=String(text)
+   .replace(/[|]/g,'1')
+   .replace(/[\u00a0]/g,' ')
+   .replace(/m\s*in/gi,'min')
+   .replace(/k\s*m/gi,'km')
+   .replace(/m\.\s*in/gi,'min')
+   .replace(/k\.\s*m/gi,'km')
+   .replace(/\s*([•·])\s*/g,' $1 ')
+   .replace(/\n+/g,' ')
+   .replace(/\s+/g,' ');
+ const out=[];
+ const seen=new Set();
+
+ // 1) Formato habitual: 5 min (1.3 km), 5min 1.3km, 5 min · 1.3 km
+ const r1=/(\d{1,3})\s*min\s*(?:\([^)]*?\s*)?[•·\-,:]?\s*([0-9]{1,4}(?:[.,][0-9]+)?)\s*km/gi;
+ let m;
+ while((m=r1.exec(s))){
    const mi=num(m[1]),km=num(m[2]);
-   if(mi>0&&mi<=300&&km>0&&km<=500)out.push({mi,km});
+   if(mi>0&&mi<=300&&km>0&&km<=500){
+     const key=mi+'|'+km;if(!seen.has(key)){out.push({mi,km});seen.add(key);}
+   }
  }
- return out;
+
+ // 2) Algunos formatos de DiDi ponen primero "X min" y después
+ // "Y km" con texto intermedio (p.ej. etiquetas de recogida/viaje).
+ const r2=/(\d{1,3})\s*min\b[\s\S]{0,90}?(\d{1,4}(?:[.,][0-9]+)?)\s*km\b/gi;
+ while((m=r2.exec(s))){
+   const mi=num(m[1]),km=num(m[2]);
+   if(mi>0&&mi<=300&&km>0&&km<=500){
+     const key=mi+'|'+km;if(!seen.has(key)){out.push({mi,km});seen.add(key);}
+   }
+ }
+
+ // 3) Si OCR separa el texto en dos columnas: "5 min" ... "1.3 km".
+ const r3=/(\d{1,3})\s*min\b[\s\S]{0,180}?(\d{1,4}(?:[.,][0-9]+)?)\s*km\b/gi;
+ while((m=r3.exec(s))){
+   const mi=num(m[1]),km=num(m[2]);
+   if(mi>0&&mi<=300&&km>0&&km<=500){
+     const key=mi+'|'+km;if(!seen.has(key)){out.push({mi,km});seen.add(key);}
+   }
+ }
+
+ // Mantener solo los dos primeros tramos reales.
+ return out.slice(0,2);
 }
 function classifyHour(v){
  if(v>=300)return R.VERDE;if(v>=250)return R.BLANCO;if(v>=215)return R.AMARILLO;if(v>=200)return R.NARANJA;return R.ROJO;
@@ -154,8 +192,11 @@ async function scanNow(){
   const porHora=p*60/totalMin, porKm=p/totalKm;
   const c=finalColor(classifyHour(porHora),classifyKm(porKm));
 
-  answer.textContent=c===R.VERDE?'VERDE':c===R.BLANCO?'BLANCO':c===R.AMARILLO?'AMARILLO':c===R.NARANJA?'NARANJA':'ROJO';
+  const colorName=c===R.VERDE?'VERDE':c===R.BLANCO?'BLANCO':c===R.AMARILLO?'AMARILLO':c===R.NARANJA?'NARANJA':'ROJO';
+  answer.innerHTML=`<span class="lamp" aria-label="${colorName}"></span>`;
   answer.className=c.cls;
+  answer.querySelector('.lamp').style.background =
+    c===R.VERDE?'#18df5c':c===R.BLANCO?'#fff':c===R.AMARILLO?'#ffd21b':c===R.NARANJA?'#ff9518':'#ff3030';
   detail.textContent=`$${p.toFixed(2)} · ${totalMin} min · ${totalKm.toFixed(2)} km`;
   status.textContent='Resultado congelado · 📷 siguiente oferta';
 
