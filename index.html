@@ -3,164 +3,107 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Semáforo PRO UltraRápido</title>
+<title>Semáforo PRO — Lectura rápida</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 #camera{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
-#shade{position:fixed;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.18),transparent 35%,rgba(0,0,0,.18));pointer-events:none}
-#scanBox{position:fixed;left:5%;right:5%;top:18%;height:54%;border:2px solid rgba(255,255,255,.9);border-radius:22px;box-shadow:0 0 0 9999px rgba(0,0,0,.08);pointer-events:none}
-#scanBox:after{content:"";position:absolute;left:8%;right:8%;top:50%;height:2px;background:rgba(255,255,255,.75);box-shadow:0 0 12px rgba(255,255,255,.8)}
-#top{position:fixed;top:calc(env(safe-area-inset-top) + 12px);left:14px;right:14px;z-index:10;text-align:center}
-#status{display:inline-block;padding:9px 16px;border-radius:22px;background:rgba(0,0,0,.72);color:#fff;font-weight:700;font-size:15px}
-#start{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);border:0;border-radius:999px;padding:18px 30px;background:#10b94b;color:#fff;font-size:20px;font-weight:800;box-shadow:0 8px 30px rgba(0,0,0,.4)}
-#again{position:fixed;z-index:20;right:18px;bottom:calc(170px + env(safe-area-inset-bottom));width:58px;height:58px;border:0;border-radius:50%;background:rgba(0,0,0,.78);color:#fff;font-size:28px;box-shadow:0 4px 18px rgba(0,0,0,.35)}
-#bottom{position:fixed;z-index:15;left:12px;right:12px;bottom:calc(10px + env(safe-area-inset-bottom));padding:15px 16px 14px;border-radius:24px;background:rgba(0,0,0,.88);color:#fff;text-align:center;backdrop-filter:blur(10px)}
-#light{font-size:28px;font-weight:900;line-height:1;margin-bottom:8px}
-#numbers{font-size:18px;font-weight:800}
-#detail{margin-top:7px;color:#ddd;font-size:14px;line-height:1.35}
-#fixedInfo{margin-top:8px;color:#aaa;font-size:12px}
-.green{color:#21d75c}.white{color:#fff}.yellow{color:#ffd21c}.orange{color:#ff9418}.red{color:#ff3030}
-button{touch-action:manipulation}
+#shade{position:fixed;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.12),transparent 45%,rgba(0,0,0,.15))}
+#top{position:fixed;z-index:5;top:calc(env(safe-area-inset-top) + 10px);left:12px;right:12px;text-align:center}
+#state{display:inline-block;background:rgba(0,0,0,.68);color:#fff;padding:8px 14px;border-radius:20px;font-size:14px;font-weight:700}
+#scan{position:fixed;z-index:10;left:50%;bottom:calc(118px + env(safe-area-inset-bottom));transform:translateX(-50%);width:76px;height:76px;border:0;border-radius:50%;background:#13b94b;color:#fff;font-size:30px;font-weight:900;box-shadow:0 5px 22px rgba(0,0,0,.45)}
+#scan:disabled{opacity:.55}
+#frame{position:fixed;z-index:4;left:4%;right:4%;top:13%;height:62%;border:2px solid rgba(255,255,255,.9);border-radius:22px;pointer-events:none}
+#bottom{position:fixed;z-index:8;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));min-height:74px;padding:12px 14px;border-radius:22px;background:rgba(0,0,0,.9);color:#fff;text-align:center;backdrop-filter:blur(9px)}
+#color{font-size:27px;font-weight:950;line-height:1.05}
+#summary{margin-top:5px;font-size:12px;color:#ddd}
+.green{color:#22d65c}.white{color:#fff}.yellow{color:#ffd21c}.orange{color:#ff9518}.red{color:#ff3030}
+#start{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);padding:17px 25px;border:0;border-radius:28px;background:#13b94b;color:#fff;font-size:19px;font-weight:850}
 .hidden{display:none}
 </style>
 </head>
 <body>
 <video id="camera" autoplay playsinline muted></video>
 <div id="shade"></div>
-<div id="scanBox"></div>
-<div id="top"><span id="status">Listo para iniciar</span></div>
-<button id="start">📷 INICIAR</button>
-<button id="again" aria-label="Escanear de nuevo">↻</button>
+<div id="frame"></div>
+<div id="top"><span id="state">Cámara en espera</span></div>
+<button id="start">📷 ACTIVAR CÁMARA</button>
+<button id="scan" class="hidden" aria-label="Leer oferta">📷</button>
 
 <div id="bottom">
-  <div id="light" class="white">SEMÁFORO</div>
-  <div id="numbers">Esperando oferta…</div>
-  <div id="detail">El resultado usa el TOTAL: recogida + viaje.</div>
-  <div id="fixedInfo">$/hora y $/km se calculan sobre minutos y kilómetros totales. El color final toma el PEOR de los dos.</div>
+  <div id="color" class="white">LISTO</div>
+  <div id="summary">Pulsa 📷 cuando aparezca una oferta.</div>
 </div>
-
-<canvas id="canvas" class="hidden"></canvas>
+<canvas id="work" hidden></canvas>
 
 <script>
 const video=document.getElementById('camera');
-const canvas=document.getElementById('canvas');
+const canvas=document.getElementById('work');
 const ctx=canvas.getContext('2d',{willReadFrequently:true});
-const statusEl=document.getElementById('status');
-const startBtn=document.getElementById('start');
-const againBtn=document.getElementById('again');
-const lightEl=document.getElementById('light');
-const numbersEl=document.getElementById('numbers');
-const detailEl=document.getElementById('detail');
+const start=document.getElementById('start');
+const scan=document.getElementById('scan');
+const state=document.getElementById('state');
+const color=document.getElementById('color');
+const summary=document.getElementById('summary');
 
-let stream=null, worker=null, running=false, busy=false, lastScan=0, lastGood=0;
-let lastSignature="";
-let pendingStable=null, pendingCount=0;
+let stream=null, worker=null, ready=false, reading=false;
 
-const COLORS=[
-  {name:'VERDE',cls:'green',hour:300,km:11},
-  {name:'BLANCO',cls:'white',hour:250,km:10},
-  {name:'AMARILLO',cls:'yellow',hour:215,km:9},
-  {name:'NARANJA',cls:'orange',hour:200,km:8},
-  {name:'ROJO',cls:'red',hour:-Infinity,km:-Infinity}
+const table=[
+ {n:'VERDE',c:'green',h:300,k:11},
+ {n:'BLANCO',c:'white',h:250,k:10},
+ {n:'AMARILLO',c:'yellow',h:215,k:9},
+ {n:'NARANJA',c:'orange',h:200,k:8},
+ {n:'ROJO',c:'red',h:-1,k:-1}
 ];
 
-function parseNum(s){
+function num(s){
   s=String(s).replace(/\s/g,'');
-  if(s.includes(',') && s.includes('.')) return parseFloat(s.replace(/,/g,''));
-  if(s.includes(',')) return parseFloat(s.replace(',','.'));
-  return parseFloat(s);
+  if(s.includes('.')&&s.includes(',')) s=s.replace(/,/g,'');
+  else s=s.replace(',','.');
+  return Number(s);
 }
-
-function moneyFromText(text){
-  const m=text.match(/\$\s*([0-9]{1,6}(?:[.,][0-9]{1,2})?)/);
-  return m?parseNum(m[1]):null;
+function getPrice(t){
+  const m=t.match(/\$\s*([0-9]{1,5}(?:[.,][0-9]{1,2})?)/);
+  return m?num(m[1]):null;
 }
-
-function extractLegs(text){
-  const clean=text.replace(/\n+/g,' ').replace(/,/g,'.');
-  const re=/(\d{1,3})\s*min(?:utos)?\s*\(\s*([0-9]{1,4}(?:\.[0-9]+)?)\s*km\b/gi;
-  const out=[]; let m;
-  while((m=re.exec(clean))!==null){
-    const min=Number(m[1]), km=Number(m[2]);
-    if(Number.isFinite(min)&&Number.isFinite(km)) out.push({min,km});
+function getLegs(t){
+  // Acepta "3 min (0.7 km)" y variaciones OCR como "3min(0.7km)".
+  const s=t.replace(/\r/g,' ').replace(/\n/g,' ');
+  const re=/(\d{1,3})\s*min(?:utos)?\s*\(\s*([0-9]{1,4}(?:[.,][0-9]+)?)\s*km\b/gi;
+  const a=[]; let m;
+  while((m=re.exec(s))!==null){
+    const mi=num(m[1]), km=num(m[2]);
+    if(mi>0&&km>0&&mi<300&&km<300)a.push({mi,km});
   }
-  return out;
+  return a;
 }
-
-function classifyHour(v){
-  if(v>=300)return COLORS[0];
-  if(v>=250)return COLORS[1];
-  if(v>=215)return COLORS[2];
-  if(v>=200)return COLORS[3];
-  return COLORS[4];
+function hClass(v){
+  if(v>=300)return table[0]; if(v>=250)return table[1]; if(v>=215)return table[2]; if(v>=200)return table[3]; return table[4];
 }
-function classifyKm(v){
-  if(v>=11)return COLORS[0];
-  if(v>=10)return COLORS[1];
-  if(v>=9)return COLORS[2];
-  if(v>=8)return COLORS[3];
-  return COLORS[4];
+function kClass(v){
+  if(v>=11)return table[0]; if(v>=10)return table[1]; if(v>=9)return table[2]; if(v>=8)return table[3]; return table[4];
 }
 function worst(a,b){
-  const rank={VERDE:0,BLANCO:1,AMARILLO:2,NARANJA:3,ROJO:4};
-  return rank[a.name]>=rank[b.name]?a:b;
+  const r={VERDE:0,BLANCO:1,AMARILLO:2,NARANJA:3,ROJO:4};
+  return r[a.n]>=r[b.n]?a:b;
 }
 
-function showResult(price,mins,kms,source=''){
-  const perHour=price/mins*60;
-  const perKm=price/kms;
-  const cHour=classifyHour(perHour), cKm=classifyKm(perKm);
-  const final=worst(cHour,cKm);
-
-  lightEl.className=final.cls;
-  lightEl.textContent=final.name;
-  numbersEl.innerHTML=`$${price.toFixed(2)} · ${mins} min · ${kms.toFixed(2)} km`;
-  detailEl.innerHTML=`<b>$${perHour.toFixed(2)}/h</b> ${cHour.name} · <b>$${perKm.toFixed(2)}/km</b> ${cKm.name}<br>Color final: <b>${final.name}</b>${source?` · ${source}`:''}`;
-}
-
-function normalizeSignature(price,legs){
-  return `${price.toFixed(2)}|${legs.map(x=>x.min+':'+x.km.toFixed(2)).join('|')}`;
-}
-
-function processOCR(text){
-  const price=moneyFromText(text);
-  const legs=extractLegs(text);
-
-  // We need at least the pickup and trip legs. Never use only one leg.
-  if(price===null || legs.length<2) return false;
-
-  const totalMin=legs[0].min+legs[1].min;
-  const totalKm=legs[0].km+legs[1].km;
-  if(!Number.isFinite(totalMin)||!Number.isFinite(totalKm)||totalMin<=0||totalKm<=0) return false;
-
-  const sig=normalizeSignature(price,[{min:totalMin,km:totalKm}]);
-  if(sig!==lastSignature){
-    lastSignature=sig;
-    showResult(price,totalMin,totalKm,'lectura rápida');
-  }
-  lastGood=performance.now();
-  return true;
-}
-
-async function initWorker(){
+async function setup(){
   if(worker)return;
-  statusEl.textContent='Preparando lector…';
-  worker=await Tesseract.createWorker('spa',1,{
-    logger:m=>{
-      if(m.status==='recognizing text') statusEl.textContent=`Escaneando ${Math.round((m.progress||0)*100)}%`;
-    }
-  });
+  state.textContent='Preparando lectura…';
+  worker=await Tesseract.createWorker('spa',1);
   await worker.setParameters({
     tessedit_pageseg_mode:Tesseract.PSM.SPARSE_TEXT,
     preserve_interword_spaces:'1',
-    user_defined_dpi:'180'
+    user_defined_dpi:'190',
+    tessedit_char_whitelist:'0123456789.$,kmnMi'
   });
+  ready=true;
+  state.textContent='Cámara en espera · pulsa 📷';
 }
 
-async function startCamera(){
-  if(running)return;
+async function openCamera(){
   try{
     stream=await navigator.mediaDevices.getUserMedia({
       video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},
@@ -168,82 +111,87 @@ async function startCamera(){
     });
     video.srcObject=stream;
     await video.play();
-    running=true;
-    startBtn.classList.add('hidden');
-    statusEl.textContent='Cámara activa · buscando oferta…';
-    await initWorker();
-    requestAnimationFrame(loop);
+    start.classList.add('hidden');
+    scan.classList.remove('hidden');
+    await setup();
   }catch(e){
-    statusEl.textContent='No se pudo abrir la cámara';
-    startBtn.textContent='📷 REINTENTAR';
-    console.error(e);
+    state.textContent='No se pudo abrir la cámara';
+    start.textContent='📷 REINTENTAR';
   }
 }
 
-function capture(){
-  const vw=video.videoWidth, vh=video.videoHeight;
-  if(!vw||!vh)return null;
-  // Crop central area where the offer card normally appears.
-  const sx=Math.floor(vw*.03), sy=Math.floor(vh*.18);
-  const sw=Math.floor(vw*.94), sh=Math.floor(vh*.62);
-  const scale=Math.min(1.35,1800/sw);
-  canvas.width=Math.floor(sw*scale);
-  canvas.height=Math.floor(sh*scale);
+function makeImage(mode){
+  const w=video.videoWidth,h=video.videoHeight;
+  if(!w||!h)return null;
+
+  // Se usa prácticamente toda la pantalla para no perder ofertas con tarjetas altas/bajas.
+  const sx=Math.floor(w*.02), sy=Math.floor(h*.06);
+  const sw=Math.floor(w*.96), sh=Math.floor(h*.84);
+  const scale=Math.min(1.35,1600/sw);
+  canvas.width=Math.round(sw*scale); canvas.height=Math.round(sh*scale);
   ctx.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
-  // Mild contrast/grayscale for faster, more stable OCR.
-  const img=ctx.getImageData(0,0,canvas.width,canvas.height);
-  const d=img.data;
+
+  const img=ctx.getImageData(0,0,canvas.width,canvas.height),d=img.data;
   for(let i=0;i<d.length;i+=4){
-    const y=(d[i]*.299+d[i+1]*.587+d[i+2]*.114);
-    const v=Math.max(0,Math.min(255,(y-128)*1.35+128));
+    const y=d[i]*.299+d[i+1]*.587+d[i+2]*.114;
+    let v=y;
+    if(mode===1) v=Math.max(0,Math.min(255,(y-118)*1.65+118));
+    if(mode===2) v=y>150?255:0;
     d[i]=d[i+1]=d[i+2]=v;
   }
   ctx.putImageData(img,0,0);
   return canvas;
 }
 
-async function scan(){
-  if(!worker||busy||video.readyState<2)return;
-  busy=true;
+async function recognizeFast(){
+  if(reading||!ready)return;
+  reading=true; scan.disabled=true; state.textContent='Leyendo…';
   try{
-    const image=capture();
-    if(image){
-      const {data:{text}}=await worker.recognize(image);
-      processOCR(text);
-      statusEl.textContent=lastGood&&performance.now()-lastGood<1200?'Resultado listo · sigue escaneando':'Buscando oferta…';
-    }
-  }catch(e){ console.warn(e); }
-  finally{busy=false;}
-}
+    // Primera pasada rápida.
+    let img=makeImage(1);
+    let r=await worker.recognize(img);
+    let text=r.data.text;
+    let price=getPrice(text), legs=getLegs(text);
 
-function loop(t){
-  if(!running)return;
-  // Start a new OCR pass as soon as the previous one is done.
-  if(!busy && t-lastScan>220){
-    lastScan=t;
-    scan();
+    // Si la primera pasada no encontró las DOS piernas, hacemos una sola segunda pasada.
+    if(price===null || legs.length<2){
+      img=makeImage(2);
+      r=await worker.recognize(img);
+      text=r.data.text;
+      price=getPrice(text); legs=getLegs(text);
+    }
+
+    // Nunca damos un color si no tenemos precio + dos tramos.
+    if(price===null || legs.length<2){
+      state.textContent='No leí la oferta completa · pulsa 📷 otra vez';
+      color.textContent='LISTO';
+      color.className='white';
+      summary.textContent='Necesito: $ + minutos/km de recogida + minutos/km de viaje.';
+      return;
+    }
+
+    const totalMin=legs[0].mi+legs[1].mi;
+    const totalKm=legs[0].km+legs[1].km;
+    if(totalMin<=0||totalKm<=0)throw new Error('totales inválidos');
+
+    const ph=price*60/totalMin;
+    const pk=price/totalKm;
+    const final=worst(hClass(ph),kClass(pk));
+
+    color.className=final.c;
+    color.textContent=final.n;
+    summary.textContent=`$${price.toFixed(2)} · ${totalMin} min · ${totalKm.toFixed(2)} km`;
+    state.textContent='Resultado congelado · pulsa 📷 para la siguiente';
+  }catch(e){
+    console.warn(e);
+    state.textContent='Lectura fallida · pulsa 📷 otra vez';
+  }finally{
+    reading=false; scan.disabled=false;
   }
-  requestAnimationFrame(loop);
 }
 
-startBtn.addEventListener('click',startCamera);
-againBtn.addEventListener('click',()=>{
-  lastSignature="";
-  lastGood=0;
-  statusEl.textContent='Nueva lectura…';
-  if(!running)startCamera();
-  else scan();
-});
-
-// Keep the page awake while possible.
-if('wakeLock' in navigator){
-  let lock;
-  document.addEventListener('visibilitychange',async()=>{
-    if(document.visibilityState==='visible'&&running){
-      try{lock=await navigator.wakeLock.request('screen')}catch(e){}
-    }
-  });
-}
+start.addEventListener('click',openCamera);
+scan.addEventListener('click',recognizeFast);
 </script>
 </body>
 </html>
