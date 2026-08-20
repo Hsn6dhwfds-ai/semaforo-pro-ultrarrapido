@@ -3,53 +3,53 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Semáforo PRO — Lectura rápida</title>
+<title>Semáforo PRO — Instantáneo</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-#camera{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
-#shade{position:fixed;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.12),transparent 45%,rgba(0,0,0,.15))}
-#top{position:fixed;z-index:5;top:calc(env(safe-area-inset-top) + 10px);left:12px;right:12px;text-align:center}
-#state{display:inline-block;background:rgba(0,0,0,.68);color:#fff;padding:8px 14px;border-radius:20px;font-size:14px;font-weight:700}
-#scan{position:fixed;z-index:10;left:50%;bottom:calc(118px + env(safe-area-inset-bottom));transform:translateX(-50%);width:76px;height:76px;border:0;border-radius:50%;background:#13b94b;color:#fff;font-size:30px;font-weight:900;box-shadow:0 5px 22px rgba(0,0,0,.45)}
-#scan:disabled{opacity:.55}
-#frame{position:fixed;z-index:4;left:4%;right:4%;top:13%;height:62%;border:2px solid rgba(255,255,255,.9);border-radius:22px;pointer-events:none}
-#bottom{position:fixed;z-index:8;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));min-height:74px;padding:12px 14px;border-radius:22px;background:rgba(0,0,0,.9);color:#fff;text-align:center;backdrop-filter:blur(9px)}
-#color{font-size:27px;font-weight:950;line-height:1.05}
-#summary{margin-top:5px;font-size:12px;color:#ddd}
-.green{color:#22d65c}.white{color:#fff}.yellow{color:#ffd21c}.orange{color:#ff9518}.red{color:#ff3030}
-#start{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);padding:17px 25px;border:0;border-radius:28px;background:#13b94b;color:#fff;font-size:19px;font-weight:850}
+#camera,#freeze{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+#freeze{display:none}
+#top{position:fixed;z-index:8;top:calc(env(safe-area-inset-top) + 10px);left:12px;right:12px;text-align:center}
+#state{display:inline-block;padding:8px 14px;border-radius:22px;background:rgba(0,0,0,.72);color:#fff;font-weight:750;font-size:14px}
+#box{position:fixed;z-index:5;left:4%;right:4%;top:13%;height:64%;border:2px solid rgba(255,255,255,.88);border-radius:22px;pointer-events:none}
+#shade{position:fixed;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.1),transparent 50%,rgba(0,0,0,.12))}
+#scan{position:fixed;z-index:20;left:50%;bottom:calc(112px + env(safe-area-inset-bottom));transform:translateX(-50%);width:76px;height:76px;border:0;border-radius:50%;background:#13bc4d;color:#fff;font-size:29px;box-shadow:0 5px 22px rgba(0,0,0,.45)}
+#scan:active{transform:translateX(-50%) scale(.94)}
+#start{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);padding:17px 25px;border:0;border-radius:28px;background:#13bc4d;color:#fff;font-size:19px;font-weight:850}
+#bottom{position:fixed;z-index:10;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));min-height:76px;padding:11px 14px;border-radius:22px;background:rgba(0,0,0,.9);color:#fff;text-align:center;backdrop-filter:blur(9px)}
+#color{font-size:31px;font-weight:950;line-height:1.05}
+#totals{margin-top:5px;font-size:13px;color:#ddd}
+.green{color:#20d85d}.white{color:#fff}.yellow{color:#ffd21c}.orange{color:#ff9518}.red{color:#ff3030}
 .hidden{display:none}
 </style>
 </head>
 <body>
 <video id="camera" autoplay playsinline muted></video>
+<canvas id="freeze"></canvas>
 <div id="shade"></div>
-<div id="frame"></div>
+<div id="box"></div>
 <div id="top"><span id="state">Cámara en espera</span></div>
-<button id="start">📷 ACTIVAR CÁMARA</button>
-<button id="scan" class="hidden" aria-label="Leer oferta">📷</button>
-
+<button id="start">📷 ACTIVAR</button>
+<button id="scan" class="hidden" aria-label="Escanear oferta">📷</button>
 <div id="bottom">
   <div id="color" class="white">LISTO</div>
-  <div id="summary">Pulsa 📷 cuando aparezca una oferta.</div>
+  <div id="totals">La lectura usa recogida + viaje.</div>
 </div>
-<canvas id="work" hidden></canvas>
 
 <script>
 const video=document.getElementById('camera');
-const canvas=document.getElementById('work');
-const ctx=canvas.getContext('2d',{willReadFrequently:true});
-const start=document.getElementById('start');
-const scan=document.getElementById('scan');
+const freeze=document.getElementById('freeze');
+const fctx=freeze.getContext('2d',{willReadFrequently:true});
+const startBtn=document.getElementById('start');
+const scanBtn=document.getElementById('scan');
 const state=document.getElementById('state');
 const color=document.getElementById('color');
-const summary=document.getElementById('summary');
+const totals=document.getElementById('totals');
 
-let stream=null, worker=null, ready=false, reading=false;
+let stream=null, worker=null, busy=false, cameraOn=false, readerReady=false;
 
-const table=[
+const T=[
  {n:'VERDE',c:'green',h:300,k:11},
  {n:'BLANCO',c:'white',h:250,k:10},
  {n:'AMARILLO',c:'yellow',h:215,k:9},
@@ -57,53 +57,55 @@ const table=[
  {n:'ROJO',c:'red',h:-1,k:-1}
 ];
 
-function num(s){
+function N(s){
   s=String(s).replace(/\s/g,'');
   if(s.includes('.')&&s.includes(',')) s=s.replace(/,/g,'');
   else s=s.replace(',','.');
   return Number(s);
 }
-function getPrice(t){
+
+function priceOf(t){
   const m=t.match(/\$\s*([0-9]{1,5}(?:[.,][0-9]{1,2})?)/);
-  return m?num(m[1]):null;
+  return m?N(m[1]):null;
 }
-function getLegs(t){
-  // Acepta "3 min (0.7 km)" y variaciones OCR como "3min(0.7km)".
+
+function legsOf(t){
+  // Flexible con errores OCR comunes, pero siempre exige minutos + km en el mismo tramo.
   const s=t.replace(/\r/g,' ').replace(/\n/g,' ');
-  const re=/(\d{1,3})\s*min(?:utos)?\s*\(\s*([0-9]{1,4}(?:[.,][0-9]+)?)\s*km\b/gi;
+  const re=/(\d{1,3})\s*(?:min|m[i1l]n)\s*\(\s*([0-9]{1,4}(?:[.,][0-9]+)?)\s*(?:km|k[mn])\b/gi;
   const a=[]; let m;
   while((m=re.exec(s))!==null){
-    const mi=num(m[1]), km=num(m[2]);
-    if(mi>0&&km>0&&mi<300&&km<300)a.push({mi,km});
+    const mi=N(m[1]), km=N(m[2]);
+    if(mi>0&&mi<=240&&km>0&&km<=300)a.push({mi,km});
   }
   return a;
 }
-function hClass(v){
-  if(v>=300)return table[0]; if(v>=250)return table[1]; if(v>=215)return table[2]; if(v>=200)return table[3]; return table[4];
+
+function hourClass(v){
+  if(v>=300)return T[0]; if(v>=250)return T[1]; if(v>=215)return T[2]; if(v>=200)return T[3]; return T[4];
 }
-function kClass(v){
-  if(v>=11)return table[0]; if(v>=10)return table[1]; if(v>=9)return table[2]; if(v>=8)return table[3]; return table[4];
+function kmClass(v){
+  if(v>=11)return T[0]; if(v>=10)return T[1]; if(v>=9)return T[2]; if(v>=8)return T[3]; return T[4];
 }
 function worst(a,b){
   const r={VERDE:0,BLANCO:1,AMARILLO:2,NARANJA:3,ROJO:4};
   return r[a.n]>=r[b.n]?a:b;
 }
 
-async function setup(){
+async function prepareReader(){
   if(worker)return;
-  state.textContent='Preparando lectura…';
+  state.textContent='Preparando lector…';
   worker=await Tesseract.createWorker('spa',1);
   await worker.setParameters({
     tessedit_pageseg_mode:Tesseract.PSM.SPARSE_TEXT,
     preserve_interword_spaces:'1',
-    user_defined_dpi:'190',
-    tessedit_char_whitelist:'0123456789.$,kmnMi'
+    user_defined_dpi:'200'
   });
-  ready=true;
-  state.textContent='Cámara en espera · pulsa 📷';
+  readerReady=true;
 }
 
 async function openCamera(){
+  if(cameraOn)return;
   try{
     stream=await navigator.mediaDevices.getUserMedia({
       video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},
@@ -111,87 +113,126 @@ async function openCamera(){
     });
     video.srcObject=stream;
     await video.play();
-    start.classList.add('hidden');
-    scan.classList.remove('hidden');
-    await setup();
+    cameraOn=true;
+    freeze.style.display='none';
+    video.style.display='block';
+    startBtn.classList.add('hidden');
+    scanBtn.classList.remove('hidden');
+    state.textContent='Cámara lista';
+    // El lector se prepara mientras la cámara ya está visible.
+    prepareReader().then(()=>{
+      if(cameraOn&&!busy) setTimeout(scanOnce,250);
+    });
   }catch(e){
     state.textContent='No se pudo abrir la cámara';
-    start.textContent='📷 REINTENTAR';
+    startBtn.textContent='📷 REINTENTAR';
   }
 }
 
-function makeImage(mode){
+function frameForOCR(pass){
   const w=video.videoWidth,h=video.videoHeight;
   if(!w||!h)return null;
 
-  // Se usa prácticamente toda la pantalla para no perder ofertas con tarjetas altas/bajas.
-  const sx=Math.floor(w*.02), sy=Math.floor(h*.06);
-  const sw=Math.floor(w*.96), sh=Math.floor(h*.84);
-  const scale=Math.min(1.35,1600/sw);
-  canvas.width=Math.round(sw*scale); canvas.height=Math.round(sh*scale);
-  ctx.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
+  // La tarjeta de oferta suele estar en la zona central/inferior.
+  const sx=Math.floor(w*.025);
+  const sy=pass===0?Math.floor(h*.13):Math.floor(h*.20);
+  const sw=Math.floor(w*.95);
+  const sh=pass===0?Math.floor(h*.68):Math.floor(h*.58);
 
-  const img=ctx.getImageData(0,0,canvas.width,canvas.height),d=img.data;
+  const scale=Math.min(1.5,1800/sw);
+  const cw=Math.round(sw*scale), ch=Math.round(sh*scale);
+  const c=document.createElement('canvas');
+  c.width=cw;c.height=ch;
+  const x=c.getContext('2d',{willReadFrequently:true});
+  x.drawImage(video,sx,sy,sw,sh,0,0,cw,ch);
+
+  const img=x.getImageData(0,0,cw,ch),d=img.data;
   for(let i=0;i<d.length;i+=4){
     const y=d[i]*.299+d[i+1]*.587+d[i+2]*.114;
-    let v=y;
-    if(mode===1) v=Math.max(0,Math.min(255,(y-118)*1.65+118));
-    if(mode===2) v=y>150?255:0;
+    // Contraste moderado: no destruye letras finas como el filtro agresivo anterior.
+    const v=Math.max(0,Math.min(255,(y-128)*1.18+128));
     d[i]=d[i+1]=d[i+2]=v;
   }
-  ctx.putImageData(img,0,0);
-  return canvas;
+  x.putImageData(img,0,0);
+  return c;
 }
 
-async function recognizeFast(){
-  if(reading||!ready)return;
-  reading=true; scan.disabled=true; state.textContent='Leyendo…';
-  try{
-    // Primera pasada rápida.
-    let img=makeImage(1);
-    let r=await worker.recognize(img);
-    let text=r.data.text;
-    let price=getPrice(text), legs=getLegs(text);
+function freezeFrame(){
+  const w=video.videoWidth,h=video.videoHeight;
+  if(!w||!h)return;
+  freeze.width=w;freeze.height=h;
+  fctx.drawImage(video,0,0,w,h);
+  freeze.style.display='block';
+  video.style.display='none';
+  if(stream){
+    stream.getTracks().forEach(t=>t.stop());
+    stream=null;
+  }
+  cameraOn=false;
+}
 
-    // Si la primera pasada no encontró las DOS piernas, hacemos una sola segunda pasada.
-    if(price===null || legs.length<2){
-      img=makeImage(2);
-      r=await worker.recognize(img);
-      text=r.data.text;
-      price=getPrice(text); legs=getLegs(text);
+async function scanOnce(){
+  if(busy||!readerReady||!cameraOn)return;
+  busy=true; scanBtn.disabled=true; state.textContent='Leyendo…';
+
+  try{
+    // Pasada 1: rápida.
+    let result=await worker.recognize(frameForOCR(0));
+    let text=result.data.text;
+    let p=priceOf(text), legs=legsOf(text);
+
+    // Solo si faltan datos, una segunda pasada. No hay escaneo continuo.
+    if(p===null||legs.length<2){
+      result=await worker.recognize(frameForOCR(1));
+      text=result.data.text;
+      p=priceOf(text); legs=legsOf(text);
     }
 
-    // Nunca damos un color si no tenemos precio + dos tramos.
-    if(price===null || legs.length<2){
-      state.textContent='No leí la oferta completa · pulsa 📷 otra vez';
+    // Nunca inventar un color: necesitamos los DOS tramos.
+    if(p===null||legs.length<2){
+      state.textContent='No leí completa · vuelve a pulsar 📷';
       color.textContent='LISTO';
       color.className='white';
-      summary.textContent='Necesito: $ + minutos/km de recogida + minutos/km de viaje.';
+      totals.textContent='Necesito recogida + viaje (min y km).';
       return;
     }
 
-    const totalMin=legs[0].mi+legs[1].mi;
-    const totalKm=legs[0].km+legs[1].km;
-    if(totalMin<=0||totalKm<=0)throw new Error('totales inválidos');
+    const minTotal=legs[0].mi+legs[1].mi;
+    const kmTotal=legs[0].km+legs[1].km;
+    if(!Number.isFinite(minTotal)||!Number.isFinite(kmTotal)||minTotal<=0||kmTotal<=0)throw 0;
 
-    const ph=price*60/totalMin;
-    const pk=price/totalKm;
-    const final=worst(hClass(ph),kClass(pk));
+    // Se calculan internamente. NO se muestran $/h ni $/km.
+    const h=p*60/minTotal;
+    const k=p/kmTotal;
+    const final=worst(hourClass(h),kmClass(k));
 
-    color.className=final.c;
     color.textContent=final.n;
-    summary.textContent=`$${price.toFixed(2)} · ${totalMin} min · ${totalKm.toFixed(2)} km`;
-    state.textContent='Resultado congelado · pulsa 📷 para la siguiente';
+    color.className=final.c;
+    totals.textContent=`$${p.toFixed(2)} · ${minTotal} min · ${kmTotal.toFixed(2)} km`;
+    state.textContent='Resultado congelado · 📷 para siguiente';
+    freezeFrame();
   }catch(e){
     console.warn(e);
-    state.textContent='Lectura fallida · pulsa 📷 otra vez';
+    state.textContent='No leí completa · vuelve a pulsar 📷';
   }finally{
-    reading=false; scan.disabled=false;
+    busy=false;scanBtn.disabled=false;
   }
 }
 
-start.addEventListener('click',openCamera);
-scan.addEventListener('click',recognizeFast);
+async function nextScan(){
+  if(busy)return;
+  // Reactiva cámara solo para esta lectura.
+  await openCamera();
+  // openCamera ya dispara una lectura automática cuando el lector está listo.
+}
+
+// El botón funciona como "nueva oferta": si está congelado, vuelve a abrir cámara;
+// si ya está abierta, escanea inmediatamente.
+scanBtn.addEventListener('click',()=>{
+  if(!cameraOn) nextScan();
+  else scanOnce();
+});
+startBtn.addEventListener('click',openCamera);
 </script>
 </body>
 </html>
