@@ -3,236 +3,188 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Semáforo PRO — Instantáneo</title>
+<title>Semáforo PRO V4</title>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
-*{box-sizing:border-box}
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-#camera,#freeze{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
-#freeze{display:none}
-#top{position:fixed;z-index:8;top:calc(env(safe-area-inset-top) + 10px);left:12px;right:12px;text-align:center}
-#state{display:inline-block;padding:8px 14px;border-radius:22px;background:rgba(0,0,0,.72);color:#fff;font-weight:750;font-size:14px}
-#box{position:fixed;z-index:5;left:4%;right:4%;top:13%;height:64%;border:2px solid rgba(255,255,255,.88);border-radius:22px;pointer-events:none}
-#shade{position:fixed;inset:0;z-index:2;pointer-events:none;background:linear-gradient(180deg,rgba(0,0,0,.1),transparent 50%,rgba(0,0,0,.12))}
-#scan{position:fixed;z-index:20;left:50%;bottom:calc(112px + env(safe-area-inset-bottom));transform:translateX(-50%);width:76px;height:76px;border:0;border-radius:50%;background:#13bc4d;color:#fff;font-size:29px;box-shadow:0 5px 22px rgba(0,0,0,.45)}
-#scan:active{transform:translateX(-50%) scale(.94)}
-#start{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);padding:17px 25px;border:0;border-radius:28px;background:#13bc4d;color:#fff;font-size:19px;font-weight:850}
-#bottom{position:fixed;z-index:10;left:10px;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));min-height:76px;padding:11px 14px;border-radius:22px;background:rgba(0,0,0,.9);color:#fff;text-align:center;backdrop-filter:blur(9px)}
-#color{font-size:31px;font-weight:950;line-height:1.05}
-#totals{margin-top:5px;font-size:13px;color:#ddd}
-.green{color:#20d85d}.white{color:#fff}.yellow{color:#ffd21c}.orange{color:#ff9518}.red{color:#ff3030}
-.hidden{display:none}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+#camera,#frozen{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+#frozen{display:none}
+#shade{position:fixed;inset:0;z-index:2;background:linear-gradient(180deg,rgba(0,0,0,.08),transparent 55%,rgba(0,0,0,.18));pointer-events:none}
+#top{position:fixed;z-index:10;top:calc(env(safe-area-inset-top) + 10px);left:10px;right:10px;text-align:center}
+#status{display:inline-block;background:rgba(0,0,0,.78);color:#fff;padding:9px 15px;border-radius:22px;font-size:14px;font-weight:800}
+#box{position:fixed;z-index:5;left:4%;right:4%;top:17%;height:60%;border:2px solid rgba(255,255,255,.9);border-radius:22px;pointer-events:none}
+#scan{position:fixed;z-index:20;left:50%;bottom:calc(112px + env(safe-area-inset-bottom));transform:translateX(-50%);width:76px;height:76px;border:0;border-radius:50%;background:#10c94b;color:#fff;font-size:29px;box-shadow:0 5px 22px rgba(0,0,0,.5)}
+#scan:disabled{opacity:.5}
+#bottom{position:fixed;z-index:10;left:10px;right:10px;bottom:calc(9px + env(safe-area-inset-bottom));min-height:78px;padding:10px 14px;border-radius:22px;background:rgba(0,0,0,.92);color:#fff;text-align:center}
+#answer{font-size:32px;font-weight:950;line-height:1.05}
+#detail{margin-top:5px;font-size:13px;color:#ddd}
+.green{color:#18df5c}.white{color:#fff}.yellow{color:#ffd21b}.orange{color:#ff9518}.red{color:#ff3030}
+#debug{position:fixed;left:8px;right:8px;bottom:calc(100px + env(safe-area-inset-bottom));z-index:9;display:none;background:rgba(0,0,0,.75);color:#fff;border-radius:12px;padding:7px;font-size:11px}
 </style>
 </head>
 <body>
 <video id="camera" autoplay playsinline muted></video>
-<canvas id="freeze"></canvas>
-<div id="shade"></div>
-<div id="box"></div>
-<div id="top"><span id="state">Cámara en espera</span></div>
-<button id="start">📷 ACTIVAR</button>
-<button id="scan" class="hidden" aria-label="Escanear oferta">📷</button>
-<div id="bottom">
-  <div id="color" class="white">LISTO</div>
-  <div id="totals">La lectura usa recogida + viaje.</div>
-</div>
+<canvas id="frozen"></canvas>
+<div id="shade"></div><div id="box"></div>
+<div id="top"><span id="status">Abriendo cámara…</span></div>
+<button id="scan" disabled>📷</button>
+<div id="bottom"><div id="answer" class="white">LISTO</div><div id="detail">Pulsa 📷 cuando aparezca una oferta.</div></div>
+<div id="debug"></div>
 
 <script>
-const video=document.getElementById('camera');
-const freeze=document.getElementById('freeze');
-const fctx=freeze.getContext('2d',{willReadFrequently:true});
-const startBtn=document.getElementById('start');
-const scanBtn=document.getElementById('scan');
-const state=document.getElementById('state');
-const color=document.getElementById('color');
-const totals=document.getElementById('totals');
+const video=document.getElementById('camera'), frozen=document.getElementById('frozen');
+const scan=document.getElementById('scan'), status=document.getElementById('status');
+const answer=document.getElementById('answer'), detail=document.getElementById('detail');
 
-let stream=null, worker=null, busy=false, cameraOn=false, readerReady=false;
+let stream=null, worker=null, busy=false, ready=false;
 
-const T=[
- {n:'VERDE',c:'green',h:300,k:11},
- {n:'BLANCO',c:'white',h:250,k:10},
- {n:'AMARILLO',c:'yellow',h:215,k:9},
- {n:'NARANJA',c:'orange',h:200,k:8},
- {n:'ROJO',c:'red',h:-1,k:-1}
-];
+const R={
+ VERDE:{cls:'green',rank:0,h:300,k:11},
+ BLANCO:{cls:'white',rank:1,h:250,k:10},
+ AMARILLO:{cls:'yellow',rank:2,h:215,k:9},
+ NARANJA:{cls:'orange',rank:3,h:200,k:8},
+ ROJO:{cls:'red',rank:4,h:0,k:0}
+};
 
-function N(s){
-  s=String(s).replace(/\s/g,'');
-  if(s.includes('.')&&s.includes(',')) s=s.replace(/,/g,'');
-  else s=s.replace(',','.');
-  return Number(s);
+function num(s){
+ s=String(s).replace(/\s/g,'');
+ if(s.includes('.')&&s.includes(','))s=s.replace(/,/g,'');
+ else s=s.replace(',','.');
+ return Number(s);
+}
+function price(text){
+ const m=text.match(/\$\s*([0-9]{1,5}(?:[.,][0-9]{1,2})?)/);
+ return m?num(m[1]):null;
+}
+function legs(text){
+ // Acepta OCR con "min", "m in", "km", "k m", etc.
+ const s=text.replace(/[|]/g,'1').replace(/\u00a0/g,' ');
+ const re=/(\d{1,3})\s*m\s*i\s*n\s*[\(\[]\s*([0-9]{1,4}(?:[.,][0-9]+)?)\s*k\s*m/gi;
+ const out=[];let m;
+ while((m=re.exec(s))){
+   const mi=num(m[1]),km=num(m[2]);
+   if(mi>0&&mi<=300&&km>0&&km<=500)out.push({mi,km});
+ }
+ return out;
+}
+function classifyHour(v){
+ if(v>=300)return R.VERDE;if(v>=250)return R.BLANCO;if(v>=215)return R.AMARILLO;if(v>=200)return R.NARANJA;return R.ROJO;
+}
+function classifyKm(v){
+ if(v>=11)return R.VERDE;if(v>=10)return R.BLANCO;if(v>=9)return R.AMARILLO;if(v>=8)return R.NARANJA;return R.ROJO;
+}
+function finalColor(a,b){return a.rank>b.rank?a:b}
+
+function preprocess(){
+ const w=video.videoWidth,h=video.videoHeight;
+ if(!w||!h)throw Error('camera-not-ready');
+ const maxW=1500,scale=Math.min(1,maxW/w);
+ const c=document.createElement('canvas');c.width=Math.round(w*scale);c.height=Math.round(h*scale);
+ const x=c.getContext('2d',{willReadFrequently:true});
+ x.drawImage(video,0,0,c.width,c.height);
+ const im=x.getImageData(0,0,c.width,c.height),d=im.data;
+ // Escala de grises + contraste suave. NO recorta: así no perdemos la tarjeta por orientación del video.
+ for(let i=0;i<d.length;i+=4){
+   const y=d[i]*.299+d[i+1]*.587+d[i+2]*.114;
+   const v=Math.max(0,Math.min(255,(y-128)*1.28+128));
+   d[i]=d[i+1]=d[i+2]=v;
+ }
+ x.putImageData(im,0,0);
+ return c;
 }
 
-function priceOf(t){
-  const m=t.match(/\$\s*([0-9]{1,5}(?:[.,][0-9]{1,2})?)/);
-  return m?N(m[1]):null;
-}
+async function init(){
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({
+   video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:1280}},
+   audio:false
+  });
+  video.srcObject=stream;await video.play();
+  status.textContent='Cámara lista · pulsa 📷';
+  scan.disabled=false;
 
-function legsOf(t){
-  // Flexible con errores OCR comunes, pero siempre exige minutos + km en el mismo tramo.
-  const s=t.replace(/\r/g,' ').replace(/\n/g,' ');
-  const re=/(\d{1,3})\s*(?:min|m[i1l]n)\s*\(\s*([0-9]{1,4}(?:[.,][0-9]+)?)\s*(?:km|k[mn])\b/gi;
-  const a=[]; let m;
-  while((m=re.exec(s))!==null){
-    const mi=N(m[1]), km=N(m[2]);
-    if(mi>0&&mi<=240&&km>0&&km<=300)a.push({mi,km});
-  }
-  return a;
-}
-
-function hourClass(v){
-  if(v>=300)return T[0]; if(v>=250)return T[1]; if(v>=215)return T[2]; if(v>=200)return T[3]; return T[4];
-}
-function kmClass(v){
-  if(v>=11)return T[0]; if(v>=10)return T[1]; if(v>=9)return T[2]; if(v>=8)return T[3]; return T[4];
-}
-function worst(a,b){
-  const r={VERDE:0,BLANCO:1,AMARILLO:2,NARANJA:3,ROJO:4};
-  return r[a.n]>=r[b.n]?a:b;
-}
-
-async function prepareReader(){
-  if(worker)return;
-  state.textContent='Preparando lector…';
+  // Preparar OCR en segundo plano; no bloquea la cámara.
   worker=await Tesseract.createWorker('spa',1);
   await worker.setParameters({
-    tessedit_pageseg_mode:Tesseract.PSM.SPARSE_TEXT,
-    preserve_interword_spaces:'1',
-    user_defined_dpi:'200'
+   tessedit_pageseg_mode:'11',
+   preserve_interword_spaces:'1',
+   user_defined_dpi:'180'
   });
-  readerReady=true;
+  ready=true;
+  status.textContent='Cámara lista · pulsa 📷';
+ }catch(e){
+  console.error(e);status.textContent='No se pudo iniciar la cámara';
+ }
 }
 
-async function openCamera(){
-  if(cameraOn)return;
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({
-      video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},
-      audio:false
-    });
-    video.srcObject=stream;
-    await video.play();
-    cameraOn=true;
-    freeze.style.display='none';
-    video.style.display='block';
-    startBtn.classList.add('hidden');
-    scanBtn.classList.remove('hidden');
-    state.textContent='Cámara lista';
-    // El lector se prepara mientras la cámara ya está visible.
-    prepareReader().then(()=>{
-      if(cameraOn&&!busy) setTimeout(scanOnce,250);
-    });
-  }catch(e){
-    state.textContent='No se pudo abrir la cámara';
-    startBtn.textContent='📷 REINTENTAR';
+async function scanNow(){
+ if(busy)return;
+ busy=true;scan.disabled=true;status.textContent='Leyendo oferta…';
+ try{
+  if(!ready){
+   status.textContent='Preparando lector…';
+   while(!ready)await new Promise(r=>setTimeout(r,50));
   }
-}
+  const img=preprocess();
+  let text=(await worker.recognize(img)).data.text;
+  let p=price(text), L=legs(text);
 
-function frameForOCR(pass){
+  // Segunda lectura SOLO si faltan los dos tramos. Usa la imagen original,
+  // porque algunos teléfonos destruyen los grises de letras con el contraste.
+  if(p===null||L.length<2){
+   const w=video.videoWidth,h=video.videoHeight;
+   const c=document.createElement('canvas');c.width=w;c.height=h;
+   c.getContext('2d').drawImage(video,0,0,w,h);
+   text=(await worker.recognize(c)).data.text;
+   p=price(text);L=legs(text);
+  }
+
+  if(p===null||L.length<2){
+   answer.textContent='LISTO';answer.className='white';
+   detail.textContent='No leí completa · vuelve a pulsar 📷';
+   status.textContent='No leí la oferta completa · 📷 otra vez';
+   return;
+  }
+
+  // LOS DOS TRAMOS, siempre: recogida + viaje.
+  const totalMin=L[0].mi+L[1].mi;
+  const totalKm=L[0].km+L[1].km;
+  if(!(totalMin>0&&totalKm>0))throw Error('bad-total');
+
+  const porHora=p*60/totalMin, porKm=p/totalKm;
+  const c=finalColor(classifyHour(porHora),classifyKm(porKm));
+
+  answer.textContent=c===R.VERDE?'VERDE':c===R.BLANCO?'BLANCO':c===R.AMARILLO?'AMARILLO':c===R.NARANJA?'NARANJA':'ROJO';
+  answer.className=c.cls;
+  detail.textContent=`$${p.toFixed(2)} · ${totalMin} min · ${totalKm.toFixed(2)} km`;
+  status.textContent='Resultado congelado · 📷 siguiente oferta';
+
+  // Congelar inmediatamente. La cámara deja de procesar hasta el siguiente toque.
   const w=video.videoWidth,h=video.videoHeight;
-  if(!w||!h)return null;
-
-  // La tarjeta de oferta suele estar en la zona central/inferior.
-  const sx=Math.floor(w*.025);
-  const sy=pass===0?Math.floor(h*.13):Math.floor(h*.20);
-  const sw=Math.floor(w*.95);
-  const sh=pass===0?Math.floor(h*.68):Math.floor(h*.58);
-
-  const scale=Math.min(1.5,1800/sw);
-  const cw=Math.round(sw*scale), ch=Math.round(sh*scale);
-  const c=document.createElement('canvas');
-  c.width=cw;c.height=ch;
-  const x=c.getContext('2d',{willReadFrequently:true});
-  x.drawImage(video,sx,sy,sw,sh,0,0,cw,ch);
-
-  const img=x.getImageData(0,0,cw,ch),d=img.data;
-  for(let i=0;i<d.length;i+=4){
-    const y=d[i]*.299+d[i+1]*.587+d[i+2]*.114;
-    // Contraste moderado: no destruye letras finas como el filtro agresivo anterior.
-    const v=Math.max(0,Math.min(255,(y-128)*1.18+128));
-    d[i]=d[i+1]=d[i+2]=v;
-  }
-  x.putImageData(img,0,0);
-  return c;
+  frozen.width=w;frozen.height=h;frozen.getContext('2d').drawImage(video,0,0,w,h);
+  frozen.style.display='block';video.style.display='none';
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}
+ }catch(e){
+  console.error(e);status.textContent='No leí la oferta · 📷 otra vez';
+  answer.textContent='LISTO';answer.className='white';
+  detail.textContent='Pulsa 📷 para intentar nuevamente.';
+ }finally{
+  busy=false;scan.disabled=false;
+ }
 }
 
-function freezeFrame(){
-  const w=video.videoWidth,h=video.videoHeight;
-  if(!w||!h)return;
-  freeze.width=w;freeze.height=h;
-  fctx.drawImage(video,0,0,w,h);
-  freeze.style.display='block';
-  video.style.display='none';
-  if(stream){
-    stream.getTracks().forEach(t=>t.stop());
-    stream=null;
-  }
-  cameraOn=false;
-}
-
-async function scanOnce(){
-  if(busy||!readerReady||!cameraOn)return;
-  busy=true; scanBtn.disabled=true; state.textContent='Leyendo…';
-
+async function next(){
+ if(video.style.display==='none'){
+  frozen.style.display='none';video.style.display='block';
   try{
-    // Pasada 1: rápida.
-    let result=await worker.recognize(frameForOCR(0));
-    let text=result.data.text;
-    let p=priceOf(text), legs=legsOf(text);
-
-    // Solo si faltan datos, una segunda pasada. No hay escaneo continuo.
-    if(p===null||legs.length<2){
-      result=await worker.recognize(frameForOCR(1));
-      text=result.data.text;
-      p=priceOf(text); legs=legsOf(text);
-    }
-
-    // Nunca inventar un color: necesitamos los DOS tramos.
-    if(p===null||legs.length<2){
-      state.textContent='No leí completa · vuelve a pulsar 📷';
-      color.textContent='LISTO';
-      color.className='white';
-      totals.textContent='Necesito recogida + viaje (min y km).';
-      return;
-    }
-
-    const minTotal=legs[0].mi+legs[1].mi;
-    const kmTotal=legs[0].km+legs[1].km;
-    if(!Number.isFinite(minTotal)||!Number.isFinite(kmTotal)||minTotal<=0||kmTotal<=0)throw 0;
-
-    // Se calculan internamente. NO se muestran $/h ni $/km.
-    const h=p*60/minTotal;
-    const k=p/kmTotal;
-    const final=worst(hourClass(h),kmClass(k));
-
-    color.textContent=final.n;
-    color.className=final.c;
-    totals.textContent=`$${p.toFixed(2)} · ${minTotal} min · ${kmTotal.toFixed(2)} km`;
-    state.textContent='Resultado congelado · 📷 para siguiente';
-    freezeFrame();
-  }catch(e){
-    console.warn(e);
-    state.textContent='No leí completa · vuelve a pulsar 📷';
-  }finally{
-    busy=false;scanBtn.disabled=false;
-  }
+   stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:1280}},audio:false});
+   video.srcObject=stream;await video.play();
+   status.textContent='Cámara lista · pulsa 📷';
+  }catch(e){status.textContent='No se pudo reactivar la cámara'}
+ } 
+ scanNow();
 }
-
-async function nextScan(){
-  if(busy)return;
-  // Reactiva cámara solo para esta lectura.
-  await openCamera();
-  // openCamera ya dispara una lectura automática cuando el lector está listo.
-}
-
-// El botón funciona como "nueva oferta": si está congelado, vuelve a abrir cámara;
-// si ya está abierta, escanea inmediatamente.
-scanBtn.addEventListener('click',()=>{
-  if(!cameraOn) nextScan();
-  else scanOnce();
-});
-startBtn.addEventListener('click',openCamera);
+scan.addEventListener('click',next);
+init();
 </script>
-</body>
-</html>
+</body></html>
